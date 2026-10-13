@@ -26,7 +26,7 @@ import java.lang.ref.WeakReference;
 public class MainActivity extends Activity {
 
     // >>>>>>>>>> CHANGE THIS to your Render address <<<<<<<<<<
-    static final String SITE_URL = "https://musicx-cef6.onrender.com";
+    static final String SITE_URL = "https://YOUR-SERVICE.onrender.com";
 
     // Desktop user agent: this is what lets YouTube keep playing in the background.
     static final String DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -46,7 +46,7 @@ public class MainActivity extends Activity {
     }
 
     class Bridge {
-        @JavascriptInterface public void meta(String title, String artist) { PlayerService.setMeta(title, artist); }
+        @JavascriptInterface public void meta(String title, String artist, String art) { PlayerService.setMeta(title, artist, art); }
         @JavascriptInterface public void playing(boolean p) { PlayerService.setPlaying(p); }
     }
 
