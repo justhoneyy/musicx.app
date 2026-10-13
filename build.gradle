@@ -1,0 +1,28 @@
+plugins {
+    id 'com.android.application' version '8.5.2'
+}
+
+android {
+    namespace 'com.wonder.music'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.wonder.music'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    // Everything lives in the repo root: no src/main/java/... folders needed
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['.']
+            java.include '*.java'
+        }
+    }
+}
