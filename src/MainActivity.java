@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -14,8 +13,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
-import android.text.TextUtils;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -29,10 +26,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.SeekBar;
-import android.widget.TextView;
 import java.lang.ref.WeakReference;
-import java.util.Locale;
 
 public class MainActivity extends Activity {
 
@@ -47,9 +41,6 @@ public class MainActivity extends Activity {
     // fills the screen and text is tiny. This makes the page use the real screen width.
     static final boolean FORCE_DEVICE_WIDTH = true;
 
-    // Native title + seek bar shown at the bottom while a track is loaded.
-    static final boolean SHOW_NATIVE_PLAYER_BAR = true;
-
     static WeakReference<WebView> web = new WeakReference<>(null);
     private WebView webView;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -60,12 +51,6 @@ public class MainActivity extends Activity {
     private View customView;
     private WebChromeClient.CustomViewCallback customCallback;
     private WebChromeClient chrome;
-
-    // native player bar
-    private LinearLayout bar;
-    private TextView barTitle, barArtist, barTime;
-    private SeekBar barSeek;
-    private boolean dragging = false;
 
     /** A WebView that never learns it went to the background, so media keeps playing. */
     static class BgWebView extends WebView {
@@ -80,18 +65,15 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void meta(String title, String artist, String art) {
             PlayerService.siteMeta = true;
             PlayerService.setMeta(title, artist, art);
-            runOnUiThread(() -> updateBar());
         }
         /** Used by the injected helper when the site itself never reports a title. */
         @JavascriptInterface public void metaFallback(String title, String artist, String art) {
             if (PlayerService.siteMeta) return;
             PlayerService.setMeta(title, artist, art);
-            runOnUiThread(() -> updateBar());
         }
         @JavascriptInterface public void playing(boolean p) { PlayerService.setPlaying(p); }
         @JavascriptInterface public void progress(long posMs, long durMs) {
             PlayerService.setProgress(posMs, durMs);
-            runOnUiThread(() -> updateBar());
         }
     }
 
@@ -103,9 +85,11 @@ public class MainActivity extends Activity {
 
         // Draw behind the status bar / notch so the site really fills the screen.
         if (Build.VERSION.SDK_INT >= 28) {
-            getWindow().getAttributes().layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
         }
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
         getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(Color.TRANSPARENT);
 
@@ -119,7 +103,6 @@ public class MainActivity extends Activity {
         content.setOrientation(LinearLayout.VERTICAL);
         content.addView(webView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-        if (SHOW_NATIVE_PLAYER_BAR) buildBar();
         root.addView(content, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         fullscreenHost = new FrameLayout(this);
@@ -129,11 +112,11 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
-        // Keep content out of the camera cut-out (left/right in landscape, top in portrait).
+        // Only keep content clear of a side cut-out (landscape); the top goes edge to edge.
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null) {
                 android.view.DisplayCutout c = insets.getDisplayCutout();
-                content.setPadding(c.getSafeInsetLeft(), c.getSafeInsetTop(),
+                content.setPadding(c.getSafeInsetLeft(), 0,
                         c.getSafeInsetRight(), 0);
             } else {
                 content.setPadding(0, 0, 0, 0);
@@ -241,89 +224,6 @@ public class MainActivity extends Activity {
         if (hasFocus) enterImmersive();   // bars come back after a swipe / dialog; hide again
     }
 
-    // ---------------------------------------------------------------- native player bar
-
-    private void buildBar() {
-        bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.VERTICAL);
-        bar.setBackgroundColor(0xFF1E1A17);
-        bar.setPadding(dp(16), dp(8), dp(16), dp(6));
-        bar.setVisibility(View.GONE);
-
-        barTitle = new TextView(this);
-        barTitle.setTextColor(Color.WHITE);
-        barTitle.setTextSize(15);
-        barTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        barTitle.setSingleLine(true);
-        barTitle.setEllipsize(TextUtils.TruncateAt.MARQUEE);
-        barTitle.setMarqueeRepeatLimit(-1);
-        barTitle.setSelected(true);
-
-        barArtist = new TextView(this);
-        barArtist.setTextColor(0xFFB8AFA7);
-        barArtist.setTextSize(12);
-        barArtist.setSingleLine(true);
-        barArtist.setEllipsize(TextUtils.TruncateAt.END);
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-
-        barSeek = new SeekBar(this);
-        barSeek.setPadding(dp(12), dp(8), dp(12), dp(8));
-        barSeek.setProgressTintList(ColorStateList.valueOf(0xFFF0A04B));
-        barSeek.setThumbTintList(ColorStateList.valueOf(0xFFF0A04B));
-        barSeek.setProgressBackgroundTintList(ColorStateList.valueOf(0x55FFFFFF));
-        barSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
-                if (fromUser) barTime.setText(fmt(p) + " / " + fmt(sb.getMax()));
-            }
-            @Override public void onStartTrackingTouch(SeekBar sb) { dragging = true; }
-            @Override public void onStopTrackingTouch(SeekBar sb) {
-                dragging = false;
-                PlayerService.seekTo(sb.getProgress());
-            }
-        });
-
-        barTime = new TextView(this);
-        barTime.setTextColor(0xFFB8AFA7);
-        barTime.setTextSize(11);
-        barTime.setSingleLine(true);
-
-        row.addView(barSeek, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        row.addView(barTime, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        bar.addView(barTitle);
-        bar.addView(barArtist);
-        bar.addView(row);
-        content.addView(bar, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-    }
-
-    private static String fmt(long ms) {
-        long s = Math.max(0, ms) / 1000;
-        long h = s / 3600, m = (s % 3600) / 60, sec = s % 60;
-        return h > 0 ? String.format(Locale.US, "%d:%02d:%02d", h, m, sec)
-                     : String.format(Locale.US, "%d:%02d", m, sec);
-    }
-
-    private void updateBar() {
-        if (bar == null) return;
-        long dur = PlayerService.durationMs, pos = PlayerService.positionMs;
-        if (dur <= 0) { bar.setVisibility(View.GONE); return; }
-        bar.setVisibility(View.VISIBLE);
-        String t = PlayerService.title, a = PlayerService.artist;
-        if (!t.contentEquals(barTitle.getText())) barTitle.setText(t);
-        if (!a.contentEquals(barArtist.getText())) barArtist.setText(a);
-        barArtist.setVisibility(a.isEmpty() ? View.GONE : View.VISIBLE);
-        if (!dragging) {
-            barSeek.setMax((int) Math.min(dur, Integer.MAX_VALUE));
-            barSeek.setProgress((int) Math.min(pos, Integer.MAX_VALUE));
-            barTime.setText(fmt(pos) + " / " + fmt(dur));
-        }
-    }
-
     // ---------------------------------------------------------------- injected JavaScript
 
     static final String VIEWPORT_JS = "(function(){try{"
@@ -340,7 +240,7 @@ public class MainActivity extends Activity {
     static final String HELPER_JS = """
 (function(){
   if (window.__wxHelper) return; window.__wxHelper = 1;
-  var yt = {pos:0, dur:0, title:'', author:'', id:''};
+  var yt = {pos:0, dur:0, title:'', author:'', id:'', state:-2};
   window.addEventListener('message', function(e){
     try {
       var d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
@@ -349,6 +249,7 @@ public class MainActivity extends Activity {
         var i = d.info;
         if (i.currentTime != null) yt.pos = i.currentTime;
         if (i.duration) yt.dur = i.duration;
+        if (i.playerState != null) yt.state = i.playerState;
         if (i.videoData) { yt.title = i.videoData.title || yt.title; yt.author = i.videoData.author || yt.author; yt.id = i.videoData.video_id || yt.id; }
       }
     } catch (_) {}
@@ -385,6 +286,19 @@ public class MainActivity extends Activity {
       else if (el)                       { pos = el.currentTime;     dur = el.duration; }
       else if (yt.dur > 0)               { pos = yt.pos;             dur = yt.dur; }
       AndroidBridge.progress(Math.round(pos * 1000), Math.round(dur * 1000));
+
+      // Real playing state, so the notification never says "paused" while sound is coming out.
+      var pl = null, all = document.querySelectorAll('audio,video');
+      for (var k = 0; k < all.length; k++) {
+        var m = all[k];
+        if (!m.paused && !m.ended && m.readyState > 2 && !m.muted) { pl = true; break; }
+      }
+      if (pl === null && all.length) pl = false;
+      var msState = navigator.mediaSession && navigator.mediaSession.playbackState;
+      if (pl === null && msState) pl = (msState === 'playing');
+      if (pl === null && p && typeof p.getPlayerState === 'function') pl = (p.getPlayerState() === 1);
+      if (pl === null && yt.state !== -2) pl = (yt.state === 1);
+      if (pl !== null && pl !== window.__wxPl) { window.__wxPl = pl; AndroidBridge.playing(pl); }
 
       var t = '', a = '', art = '', ms = navigator.mediaSession && navigator.mediaSession.metadata;
       if (ms && ms.title) {
