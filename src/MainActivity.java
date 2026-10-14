@@ -27,6 +27,18 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import java.lang.ref.WeakReference;
+import androidx.credentials.Credential;
+import androidx.credentials.CredentialManager;
+import androidx.credentials.CredentialManagerCallback;
+import androidx.credentials.CustomCredential;
+import androidx.credentials.GetCredentialRequest;
+import androidx.credentials.GetCredentialResponse;
+import androidx.credentials.exceptions.GetCredentialCancellationException;
+import androidx.credentials.exceptions.GetCredentialException;
+import androidx.credentials.exceptions.NoCredentialException;
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
 
@@ -74,6 +86,25 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void playing(boolean p) { PlayerService.setPlaying(p); }
         @JavascriptInterface public void progress(long posMs, long durMs) {
             PlayerService.setProgress(posMs, durMs);
+        }
+
+        /** Shows the phone's own Google account picker and hands the ID token back to the page. */
+        @JavascriptInterface public void googleSignIn(String webClientId) {
+            handler.post(() -> startGoogleSignIn(webClientId));
+        }
+
+        /** Opens one of the site's own links in the real browser (sign-in fallback). */
+        @JavascriptInterface public void openExternal(String url) {
+            handler.post(() -> {
+                try {
+                    Uri u = Uri.parse(url);
+                    String host = u.getHost(), scheme = u.getScheme();
+                    if (host != null && host.equals(Uri.parse(SITE_URL).getHost())
+                            && ("https".equals(scheme) || "http".equals(scheme))) {
+                        startActivity(new Intent(Intent.ACTION_VIEW, u));
+                    }
+                } catch (Exception ignored) {}
+            });
         }
     }
 
@@ -316,6 +347,71 @@ public class MainActivity extends Activity {
   setInterval(tick, 1000);
 })();
 """;
+
+    // ---------------------------------------------------------------- Google sign-in (native)
+
+    private boolean signingIn = false;
+
+    private void jsGoogleResult(String token) {
+        if (webView == null) return;
+        webView.evaluateJavascript("window.__nativeGoogle && window.__nativeGoogle("
+                + JSONObject.quote(token) + ")", null);
+    }
+
+    private void jsGoogleError(String kind, String msg) {
+        if (webView == null) return;
+        webView.evaluateJavascript("window.__nativeGoogleErr && window.__nativeGoogleErr("
+                + JSONObject.quote(kind) + "," + JSONObject.quote(msg == null ? "" : msg) + ")", null);
+    }
+
+    /**
+     * Google refuses sign-in inside a WebView, so the account picker is shown by Android itself
+     * (Credential Manager). It lists the Google accounts already signed in on the phone. The
+     * resulting ID token goes to the website, which verifies it on the server exactly like
+     * the normal browser sign-in.
+     */
+    private void startGoogleSignIn(String webClientId) {
+        if (signingIn) return;
+        if (webClientId == null || webClientId.isEmpty()) { jsGoogleError("config", "Missing web client ID"); return; }
+        signingIn = true;
+        try {
+            CredentialManager cm = CredentialManager.create(this);
+            GetSignInWithGoogleOption option = new GetSignInWithGoogleOption.Builder(webClientId).build();
+            GetCredentialRequest request = new GetCredentialRequest.Builder().addCredentialOption(option).build();
+            cm.getCredentialAsync(this, request, null, command -> handler.post(command),
+                    new CredentialManagerCallback<GetCredentialResponse, GetCredentialException>() {
+                        @Override public void onResult(GetCredentialResponse result) {
+                            signingIn = false;
+                            try {
+                                Credential c = result.getCredential();
+                                if (c instanceof CustomCredential
+                                        && GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL.equals(c.getType())) {
+                                    GoogleIdTokenCredential g =
+                                            GoogleIdTokenCredential.createFrom(((CustomCredential) c).getData());
+                                    jsGoogleResult(g.getIdToken());
+                                    return;
+                                }
+                                jsGoogleError("other", "Unexpected credential type");
+                            } catch (Exception e) {
+                                jsGoogleError("other", String.valueOf(e.getMessage()));
+                            }
+                        }
+
+                        @Override public void onError(GetCredentialException e) {
+                            signingIn = false;
+                            String m = String.valueOf(e.getMessage());
+                            if (e instanceof GetCredentialCancellationException) jsGoogleError("cancelled", "");
+                            else if (e instanceof NoCredentialException) jsGoogleError("no_account", m);
+                            else if (m.contains("28444") || m.toLowerCase().contains("not set up correctly")
+                                    || m.contains("[16]")) jsGoogleError("config", m);
+                            else jsGoogleError("other", m);
+                        }
+                    });
+        } catch (Exception e) {
+            signingIn = false;
+            jsGoogleError("other", String.valueOf(e.getMessage()));
+        }
+    }
 
     // ---------------------------------------------------------------- misc
 
