@@ -29,7 +29,7 @@ public class PlayerService extends Service {
     static final String CH = "wonder_playback";
     static final int ID = 7;
 
-    static volatile String title = "Wonder";
+    static volatile String title = "zuno";
     static volatile String artist = "Ready to play";
     static volatile boolean playing = false;
     static volatile String artUrl = "";
@@ -96,7 +96,7 @@ public class PlayerService extends Service {
             nm.createNotificationChannel(new NotificationChannel(CH, "Playback", NotificationManager.IMPORTANCE_LOW));
         }
 
-        session = new MediaSession(this, "Wonder");
+        session = new MediaSession(this, "zuno");
         session.setCallback(new MediaSession.Callback() {
             @Override public void onPlay() { run("resume()"); }
             @Override public void onPause() { run("halt()"); }
